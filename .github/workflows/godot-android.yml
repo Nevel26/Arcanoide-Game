@@ -1,0 +1,48 @@
+name: Build Godot Android APK
+
+on:
+  push:
+    branches: [main, 'claude/**']
+    paths: ['godot/**', '.github/workflows/godot-android.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  GODOT_VERSION: 4.3
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    container:
+      image: barichello/godot-ci:4.3
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Godot templates and editor settings
+        run: |
+          mkdir -v -p ~/.local/share/godot/export_templates/ ~/.config/
+          mv /root/.config/godot ~/.config/godot
+          mv /root/.local/share/godot/export_templates/${GODOT_VERSION}.stable ~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
+
+      - name: Export APK
+        working-directory: godot
+        run: |
+          mkdir -p build
+          godot --headless --import || true
+          godot --headless --export-debug "Android" build/NevelskyiArt-Arkanoid-Godot.apk
+          ls -la build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NevelskyiArt-Arkanoid-Godot-apk
+          path: godot/build/NevelskyiArt-Arkanoid-Godot.apk
+
+      - name: Publish APK as a release (easy download on phone)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: godot-build-${{ github.run_number }}
+          name: NevelskyiArt Arkanoid (Godot) build ${{ github.run_number }}
+          prerelease: true
+          files: godot/build/NevelskyiArt-Arkanoid-Godot.apk
