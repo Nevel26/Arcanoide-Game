@@ -1,0 +1,8 @@
+{
+  "appId": "com.nevelskyiart.arkanoid",
+  "appName": "NevelskyiArt Arkanoid",
+  "webDir": "dist",
+  "android": {
+    "backgroundColor": "#0b0b1a"
+  }
+}

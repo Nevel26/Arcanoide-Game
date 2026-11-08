@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">NevelskyiArt Arkanoid</string>
+    <string name="title_activity_main">NevelskyiArt Arkanoid</string>
+    <string name="package_name">com.nevelskyiart.arkanoid</string>
+    <string name="custom_url_scheme">com.nevelskyiart.arkanoid</string>
+</resources>
