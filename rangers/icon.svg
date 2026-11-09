@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <rect width="128" height="128" rx="24" fill="#05061a"/>
+  <circle cx="22" cy="40" r="16" fill="#ffe27a"/>
+  <circle cx="80" cy="70" r="30" fill="#2a4f7a"/>
+  <circle cx="72" cy="64" r="24" fill="#5fb8ff"/>
+  <ellipse cx="80" cy="72" rx="46" ry="10" fill="none" stroke="#ffd23f" stroke-width="4"/>
+  <text x="64" y="118" font-family="Arial" font-weight="bold" font-size="22" fill="#39ff6a" text-anchor="middle">ABC</text>
+</svg>

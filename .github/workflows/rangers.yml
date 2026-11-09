@@ -1,0 +1,71 @@
+name: Build Lingua Rangers
+
+on:
+  push:
+    branches: [main, 'claude/**']
+    paths: ['rangers/**', '.github/workflows/rangers.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  GODOT_VERSION: 4.3
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: barichello/godot-ci:4.3
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Godot templates and editor settings
+        run: |
+          mkdir -v -p ~/.local/share/godot/export_templates/ ~/.config/
+          mv /root/.config/godot ~/.config/godot
+          mv /root/.local/share/godot/export_templates/${GODOT_VERSION}.stable ~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
+
+      - name: Export Android APK and Web build
+        working-directory: rangers
+        run: |
+          mkdir -p build/web
+          godot --headless --import || true
+          godot --headless --export-debug "Android" build/LinguaRangers.apk
+          godot --headless --export-release "Web" build/web/index.html
+          ls -la build build/web
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LinguaRangers-apk
+          path: rangers/build/LinguaRangers.apk
+
+      - name: Publish APK as a release (easy download on phone)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: rangers-build-${{ github.run_number }}
+          name: Lingua Rangers build ${{ github.run_number }}
+          prerelease: true
+          files: rangers/build/LinguaRangers.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LinguaRangers-web
+          path: rangers/build/web
+
+  deploy-web:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: LinguaRangers-web
+          path: web
+
+      - name: Deploy web version to gh-pages branch
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: web
+          destination_dir: rangers
+          keep_files: true
