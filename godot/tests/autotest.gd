@@ -1,9 +1,10 @@
 extends Node
-## Dev-only smoke test: runs the game with an autopilot paddle and saves screenshots.
+## Dev-only smoke test: runs the game with an autopilot ship and saves screenshots.
 ## Usage: godot --path godot res://tests/autotest.tscn -- <output_dir>
 
 var game: Node2D
 var out := "user://"
+var autopilot := true
 
 
 func _ready() -> void:
@@ -21,8 +22,16 @@ func _shot(name: String) -> void:
 
 
 func _process(_d: float) -> void:
-	if game and game.balls.size() > 0:
-		game.move_paddle(game.balls[0].pos.x + 20)
+	if not autopilot or game.state != "play":
+		return
+	# aim at the lowest formation asteroid, dodge nothing (keeps the test simple)
+	var target = null
+	for a in game.asteroids:
+		if not a.free and (target == null or a.pos.y > target.pos.y):
+			target = a
+	if target:
+		game.move_ship(move_toward(game.ship_x, target.pos.x, 12))
+	game.firing = true
 
 
 func _wait(sec: float) -> void:
@@ -31,29 +40,38 @@ func _wait(sec: float) -> void:
 
 func _run() -> void:
 	await _wait(1.0)
-	await _shot("g_start")
-	var start: int = game.bricks.size()
-	game.launch()
-	await _wait(15.0)
-	print("AUTOPLAY bricks %d -> %d, score %d, lives %d, state %s" % [start, game.bricks.size(), game.score, game.lives, game.state])
-	await _shot("g_play")
-	for i in 3:
-		for br in game.bricks.duplicate():
-			if br.hp > 0:
-				game.bricks.erase(br)
+	await _shot("s_start")
+	var start: int = game.asteroids.size()
+	game.start_wave()
+	await _wait(6.0)
+	await _shot("s_play")
+	await _wait(14.0)
+	print("AUTOPLAY rocks %d -> %d, score %d, lives %d, state %s, level %d" % [start, game.formation_left(), game.score, game.lives, game.state, game.level_index])
+	await _shot("s_play2")
+	autopilot = false
+	for i in range(game.level_index, 3):
+		game.state = "play"
 		game.level_complete()
-		await _wait(0.6)
+		await _wait(0.8)
 		if i == 0:
-			await _shot("g_victory")
-		await _wait(3.2)
-		await _shot("g_level%d" % (i + 2))
-	game.heroine.sad()
-	await _wait(0.5)
-	await _shot("g_sad")
+			await _shot("s_victory")
+		await _wait(3.0)
+		game.start_wave()
+		await _wait(4.0)
+		await _shot("s_level%d" % (game.level_index + 1))
+	game.shield_time = 5.0
+	game.triple_time = 5.0
+	game.firing = true
+	autopilot = true
+	await _wait(0.6)
+	await _shot("s_powerups")
+	autopilot = false
+	game.firing = false
+	game.shield_time = 0
 	game.lives = 1
-	game.launch()
-	game.balls.clear()
-	await _wait(0.5)
-	await _shot("g_over")
+	game.invuln = 0
+	game.ship_hit()
+	await _wait(0.6)
+	await _shot("s_over")
 	print("STATE after loss: ", game.state)
 	get_tree().quit()

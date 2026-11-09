@@ -37,5 +37,21 @@ export default class Sfx {
   combo() { [784, 988, 1175, 1568].forEach((f, i) => this.tone(f, 0.09, 'square', 0.1, null, i * 0.05)); }
   lose() { this.tone(440, 0.5, 'sawtooth', 0.14, 110); }
   win() { [523, 659, 784, 1047, 784, 1047].forEach((f, i) => this.tone(f, 0.16, 'triangle', 0.16, null, i * 0.12)); }
+  laser() { this.tone(1500, 0.08, 'square', 0.05, 420); }
+  hit() { this.tone(180, 0.05, 'square', 0.07, 120); }
+  shield() { [880, 1320].forEach((f, i) => this.tone(f, 0.12, 'triangle', 0.12, null, i * 0.08)); }
+  explode() {
+    if (this.muted || !this.ctx) return;
+    const dur = 0.32;
+    const buf = this.ctx.createBuffer(1, Math.floor(this.ctx.sampleRate * dur), this.ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / data.length, 2);
+    const src = this.ctx.createBufferSource();
+    const gain = this.ctx.createGain();
+    gain.gain.value = 0.22;
+    src.buffer = buf;
+    src.connect(gain).connect(this.ctx.destination);
+    src.start();
+  }
   gameOver() { [392, 330, 262, 196].forEach((f, i) => this.tone(f, 0.3, 'triangle', 0.15, null, i * 0.22)); }
 }

@@ -24,6 +24,10 @@ func _ready() -> void:
 	_sounds.lose = _make([[440, 0.5, 0, "saw", 0.14, 110]])
 	_sounds.win = _seq([523, 659, 784, 1047, 784, 1047], 0.16, 0.12, "triangle", 0.16)
 	_sounds.game_over = _seq([392, 330, 262, 196], 0.3, 0.22, "triangle", 0.15)
+	_sounds.laser = _make([[1500, 0.08, 0, "square", 0.05, 420]])
+	_sounds.hit = _make([[180, 0.05, 0, "square", 0.07, 120]])
+	_sounds.explode = _make([[120, 0.32, 0, "noise", 0.22, 0]])
+	_sounds.shield = _seq([880, 1320], 0.12, 0.08, "triangle", 0.12)
 
 
 func play(name: String) -> void:
@@ -69,6 +73,7 @@ func _make(notes: Array) -> AudioStreamWAV:
 			match n[3]:
 				"square": s = 1.0 if phase < 0.5 else -1.0
 				"triangle": s = 4.0 * abs(phase - 0.5) - 1.0
+				"noise": s = randf() * 2.0 - 1.0
 				_: s = 2.0 * phase - 1.0
 			var env := vol * pow(0.001 / vol, t)
 			var idx := start + i

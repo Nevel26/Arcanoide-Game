@@ -1,5 +1,6 @@
 extends Node2D
-## NevelskyiArt Arkanoid: game logic, simple custom ball physics and all field drawing.
+## NevelskyiArt Space: the ship shoots a green blaster at a descending asteroid formation.
+## Asteroids and the ship are lit from the side by the level's star.
 
 const Themes := preload("res://scripts/themes.gd")
 const HeroineScript := preload("res://scripts/heroine.gd")
@@ -11,49 +12,57 @@ const H := 720.0
 const PANEL_W := 360.0
 const FIELD_X := PANEL_W
 const FIELD_W := W - PANEL_W
-const PADDLE_Y := 672.0
-const PADDLE_W := 150.0
-const PADDLE_H := 22.0
-const BALL_R := 11.0
-const BRICK_W := 80.0
-const BRICK_H := 36.0
-const BRICK_TOP := 92.0
+const SHIP_Y := 640.0
+const SHIP_R := 30.0
+const CELL_W := 80.0
+const CELL_H := 58.0
+const FORM_TOP := 112.0
+const DANGER_Y := SHIP_Y - 50.0
+const BOLT_SPEED := 950.0
 const START_LIVES := 3
 const MUTE_RECT := Rect2(1226, 12, 44, 40)
+const STAR_POS := Vector2(FIELD_X + 64, 250)
+const GREEN := Color("#39ff6a")
 
 const BONUSES := {
-	"wide": {"label": "W", "color": Color("#4cd964"), "say": "Широка платформа!"},
-	"multi": {"label": "x3", "color": Color("#b57bff"), "say": "Три м'ячі! Ура!"},
-	"slow": {"label": "S", "color": Color("#40c4ff"), "say": "Повільніше... так легше!"},
+	"triple": {"label": "x3", "color": Color("#39ff6a"), "say": "Потрійний бластер!"},
+	"rapid": {"label": "R", "color": Color("#ffd23f"), "say": "Швидкий вогонь!"},
+	"shield": {"label": "S", "color": Color("#40c4ff"), "say": "Щит активовано!"},
 	"life": {"label": "+1", "color": Color("#ff4f8b"), "say": "Додаткове життя!"},
 }
 
 const PHRASES := {
-	"combo": ["Комбо x{n}!", "Вау, x{n}!", "Так тримати! x{n}", "Ти вогонь! x{n}"],
-	"sad": ["Ой ні...", "Нічого, ще спроба!", "Я вірю в тебе!", "Ех... збери себе!"],
-	"idle": ["Ти молодець!", "Ще трошки!", "Цілься в кути!", "Мені подобається грати з тобою!", "Супер!"],
-	"win": ["Рівень пройдено!", "Перемога!", "Чудово! Далі!"],
+	"streak": ["Серія x{n}!", "Влучно! x{n}", "Ти ас! x{n}", "Так тримати! x{n}"],
+	"hit": ["Ой! Тримайся!", "Обережно!", "Корпус пошкоджено!", "Ухиляйся!"],
+	"idle": ["Цілься в великі!", "Метеор праворуч!", "Гарний політ!", "Ти найкращий пілот!"],
+	"win": ["Сектор чистий!", "Перемога!", "Летимо далі!"],
 }
 
-var themes: Array
-var theme: Dictionary
+var levels: Array
+var lvl: Dictionary
 var level_index := 0
-var state := "ready"   # ready, play, wait, transition, over, won
+var state := "ready"   # ready, play, transition, over, won
 var score := 0
 var lives := START_LIVES
-var combo := 0
-var speed := 470.0
+var streak := 0
 
-var bricks: Array = []
-var balls: Array = []
+var asteroids: Array = []   # formation rocks and free-flying meteors
+var bolts: Array = []
 var capsules: Array = []
 var floats: Array = []
+var stars: Array = []
 
-var paddle_x := FIELD_X + FIELD_W / 2
-var paddle_scale := 1.0
-var paddle_squash := 1.0
-var wide_time := 0.0
-var slow_time := 0.0
+var ship_x := FIELD_X + FIELD_W / 2
+var ship_tilt := 0.0
+var _ship_prev_x := ship_x
+var firing := false
+var fire_cd := 0.0
+var invuln := 0.0
+var shield_time := 0.0
+var triple_time := 0.0
+var rapid_time := 0.0
+var formation_y := 0.0
+var meteor_cd := 3.0
 
 var bubble_text := ""
 var bubble_alpha := 0.0
@@ -61,7 +70,7 @@ var bubble_scale := 1.0
 var bubble_left := 0.0
 var center_text := ""
 var big_text := ""
-var big_color := Color("#ffd700")
+var big_color := Color("#ffd23f")
 
 var heroine: Node2D
 var sfx: Node
@@ -70,7 +79,6 @@ var font: Font
 var _sb := StyleBoxFlat.new()
 var _time := 0.0
 var _run_id := 0
-var _level_time := 0.0
 var _last_x := 0.0
 var _drag_start := 0.0
 var _chatter := 10.0
@@ -79,15 +87,20 @@ var _chatter := 10.0
 func _ready() -> void:
 	randomize()
 	font = ThemeDB.fallback_font
-	themes = Themes.all()
+	levels = Themes.all()
 	sfx = SfxScript.new()
 	add_child(sfx)
 	heroine = HeroineScript.new()
 	heroine.position = Vector2(PANEL_W / 2, 470)
 	add_child(heroine)
+	heroine.set_theme({"key": "space"})
 	fx = ParticlesScript.new()
 	fx.z_index = 10
 	add_child(fx)
+	for layer in 2:
+		for i in 70:
+			stars.append({"pos": Vector2(randf_range(FIELD_X, W), randf_range(0, H)), "layer": layer,
+				"r": randf_range(0.6, 1.4) + layer * 0.6, "a": randf_range(0.3, 1.0)})
 	load_level(0, true)
 
 
@@ -115,22 +128,22 @@ func float_text(pos: Vector2, text: String, color := Color.WHITE) -> void:
 	floats.append({"pos": pos, "text": text, "color": color, "life": 0.7})
 
 
-func current_speed() -> float:
-	return speed * 0.72 if slow_time > 0 else speed
+func move_ship(x: float) -> void:
+	ship_x = clampf(x, FIELD_X + 44, W - 44)
 
 
-func paddle_width() -> float:
-	return PADDLE_W * paddle_scale
-
-
-func paddle_rect() -> Rect2:
-	var w := paddle_width()
-	return Rect2(paddle_x - w / 2, PADDLE_Y - PADDLE_H / 2, w, PADDLE_H)
-
-
-func move_paddle(x: float) -> void:
-	var half := paddle_width() / 2
-	paddle_x = clampf(x, FIELD_X + half, W - half)
+func make_rock(pos: Vector2, r: float, hp: int, armored := false) -> Dictionary:
+	var pts := PackedVector2Array()
+	var n := 11
+	for i in n:
+		var a := TAU * i / n + randf_range(-0.15, 0.15)
+		pts.append(Vector2(cos(a), sin(a)) * r * randf_range(0.8, 1.0))
+	var craters: Array = []
+	for i in randi_range(2, 3):
+		craters.append({"p": Vector2(randf_range(-0.45, 0.45), randf_range(-0.45, 0.45)) * r, "r": r * randf_range(0.12, 0.22)})
+	return {"pos": pos, "base": pos, "r": r, "hp": hp, "max": hp, "pts": pts, "craters": craters,
+		"rot": randf() * TAU, "spin": randf_range(-0.6, 0.6), "armored": armored, "flash": 0.0,
+		"free": false, "vel": Vector2.ZERO}
 
 
 # ---------------- input ----------------
@@ -144,17 +157,22 @@ func _input(event: InputEvent) -> void:
 				if MUTE_RECT.has_point(e.position):
 					sfx.muted = not sfx.muted
 					_drag_start = INF
-			elif absf(e.position.x - _drag_start) < 18:
-				_on_tap()
+					return
+				firing = true
+			else:
+				firing = false
+				if absf(e.position.x - _drag_start) < 18:
+					_on_tap()
 		elif e is InputEventScreenDrag and state not in ["over", "won"]:
-			move_paddle(paddle_x + e.relative.x * 1.35)
+			move_ship(ship_x + (e.position.x - _last_x) * 1.35)
+			_last_x = e.position.x
 	elif event.is_action_pressed("ui_accept"):
 		_on_tap()
 
 
 func _on_tap() -> void:
 	if state == "ready":
-		launch()
+		start_wave()
 	elif state == "over" or state == "won":
 		restart()
 
@@ -162,69 +180,56 @@ func _on_tap() -> void:
 # ---------------- levels ----------------
 func load_level(index: int, first := false) -> void:
 	level_index = index
-	theme = themes[index]
-	speed = 470.0 + index * 35.0
-	bricks.clear()
-	balls.clear()
+	lvl = levels[index]
+	asteroids.clear()
+	bolts.clear()
 	capsules.clear()
-	_level_time = 0.0
+	formation_y = -260.0
+	streak = 0
+	triple_time = 0.0
+	rapid_time = 0.0
+	big_text = ""
 
-	var layout: Array = theme.layout
+	var layout: Array = lvl.layout
 	var cols: int = layout[0].length()
-	var start_x := FIELD_X + (FIELD_W - cols * BRICK_W) / 2
+	var start_x := FIELD_X + (FIELD_W - cols * CELL_W) / 2 + CELL_W / 2
 	for r in layout.size():
 		var row: String = layout[r]
 		for c in cols:
 			var ch := row[c]
 			if ch == ".":
 				continue
-			var rect := Rect2(start_x + c * BRICK_W + 2, BRICK_TOP + r * BRICK_H - 15, BRICK_W - 4, 30)
-			var hp := -1 if ch == "X" else int(ch)
-			bricks.append({
-				"rect": rect, "hp": hp, "max": hp,
-				"color": Color("#8d93a8") if hp < 0 else theme.bricks[hp - 1],
-				"delay": (r * cols + c) * 0.012, "flash": 0.0,
-			})
+			var pos := Vector2(start_x + c * CELL_W + randf_range(-8, 8), FORM_TOP + r * CELL_H + randf_range(-6, 6))
+			if ch == "X":
+				asteroids.append(make_rock(pos, 29, 6, true))
+			else:
+				var hp := int(ch)
+				asteroids.append(make_rock(pos, 18.0 + hp * 5.0, hp))
 
-	paddle_x = FIELD_X + FIELD_W / 2
-	paddle_scale = 1.0
-	wide_time = 0.0
-	slow_time = 0.0
-	combo = 0
-	big_text = ""
-
-	if first:
-		heroine.set_theme(theme)
-		heroine.idle()
-		say("Привіт! Тапни, щоб почати!", 0)
-	else:
-		heroine.change_outfit(theme, func(): say(theme.hello, 2.6))
-		fx.burst(Vector2(PANEL_W / 2, 330), 30, [Color("#ffd700"), Color.WHITE, Color("#ff8fd2"), Color("#7bffb5")], "star")
-	ready_ball()
-
-
-func ready_ball() -> void:
 	state = "ready"
-	balls.append({"pos": Vector2(paddle_x, PADDLE_Y - 24), "vel": Vector2.ZERO, "on_paddle": true})
-	center_text = "Тапни — запуск\nВеди пальцем — платформа"
+	center_text = "Тапни — старт\nТримай палець — вогонь, веди — політ"
+	if first:
+		heroine.idle()
+		say("Привіт, пілоте! Тапни, щоб злетіти!", 0)
+	else:
+		heroine.idle()
+		heroine.cheer()
+		say(lvl.hello, 2.6)
 
 
-func launch() -> void:
+func start_wave() -> void:
 	state = "play"
 	center_text = ""
-	for b in balls:
-		if b.on_paddle:
-			b.on_paddle = false
-			var a := deg_to_rad(randf_range(-25, 25))
-			b.vel = Vector2(sin(a), -cos(a)) * current_speed()
-	sfx.play("paddle")
+	meteor_cd = lvl.meteor_every
 	_chatter = randf_range(9, 15)
+	sfx.play("shield")
+	say("Вогонь!", 1.2)
 
 
-func breakable_left() -> int:
+func formation_left() -> int:
 	var n := 0
-	for br in bricks:
-		if br.hp > 0:
+	for a in asteroids:
+		if not a.free:
 			n += 1
 	return n
 
@@ -232,26 +237,38 @@ func breakable_left() -> int:
 # ---------------- update ----------------
 func _process(delta: float) -> void:
 	_time += delta
-	_level_time += delta
 
 	if Input.is_action_pressed("ui_left"):
-		move_paddle(paddle_x - 900 * delta)
+		move_ship(ship_x - 700 * delta)
 	if Input.is_action_pressed("ui_right"):
-		move_paddle(paddle_x + 900 * delta)
+		move_ship(ship_x + 700 * delta)
+	var kb_fire := Input.is_key_pressed(KEY_SPACE)
+
+	ship_tilt = lerpf(ship_tilt, clampf((ship_x - _ship_prev_x) / maxf(delta, 0.001) / 1500.0, -0.25, 0.25), 0.2)
+	_ship_prev_x = ship_x
+
+	for s in stars:
+		s.pos.y += (18.0 + s.layer * 40.0) * delta
+		if s.pos.y > H:
+			s.pos = Vector2(randf_range(FIELD_X, W), 0)
 
 	_update_timers(delta)
-	_update_balls(delta)
+	if state == "play":
+		fire_cd -= delta
+		if (firing or kb_fire) and fire_cd <= 0.0:
+			_fire()
+		_update_formation(delta)
+		_update_meteors(delta)
+	_update_bolts(delta)
 	_update_capsules(delta)
 
+	for a in asteroids:
+		a.rot += a.spin * delta
+		a.flash = maxf(a.flash - delta, 0.0)
 	for f in floats:
 		f.life -= delta
 		f.pos.y -= 70 * delta
 	floats = floats.filter(func(f): return f.life > 0)
-	for br in bricks:
-		br.flash = maxf(br.flash - delta, 0.0)
-
-	if state == "play" and balls.is_empty():
-		lose_life()
 	queue_redraw()
 
 
@@ -260,12 +277,10 @@ func _update_timers(delta: float) -> void:
 		bubble_left -= delta
 		if bubble_left <= 0:
 			bubble_alpha = maxf(bubble_alpha - delta / 0.3, 0.0)
-	if wide_time > 0:
-		wide_time -= delta
-		if wide_time <= 0:
-			create_tween().tween_method(func(v): paddle_scale = v; move_paddle(paddle_x), paddle_scale, 1.0, 0.2)
-	if slow_time > 0:
-		slow_time -= delta
+	invuln = maxf(invuln - delta, 0.0)
+	shield_time = maxf(shield_time - delta, 0.0)
+	triple_time = maxf(triple_time - delta, 0.0)
+	rapid_time = maxf(rapid_time - delta, 0.0)
 	if state == "play":
 		_chatter -= delta
 		if _chatter <= 0:
@@ -274,117 +289,142 @@ func _update_timers(delta: float) -> void:
 				say(pick(PHRASES.idle), 1.8)
 
 
-func _update_balls(delta: float) -> void:
-	var s := current_speed()
-	var steps := 4
-	var dt := delta / steps
-	for b in balls.duplicate():
-		if b.on_paddle:
-			b.pos = Vector2(paddle_x, PADDLE_Y - 24)
+func _fire() -> void:
+	fire_cd = 0.11 if rapid_time > 0 else 0.2
+	var angles := [-0.16, 0.0, 0.16] if triple_time > 0 else [0.0]
+	for a in angles:
+		bolts.append({"pos": Vector2(ship_x, SHIP_Y - 40), "vel": Vector2(sin(a), -cos(a)) * BOLT_SPEED})
+	sfx.play("laser")
+
+
+func _update_bolts(delta: float) -> void:
+	for b in bolts.duplicate():
+		b.pos += b.vel * delta
+		if b.pos.y < -20:
+			bolts.erase(b)
+			streak = 0
 			continue
-		for i in steps:
-			b.pos += b.vel * dt
-			if b.pos.x < FIELD_X + BALL_R:
-				b.pos.x = FIELD_X + BALL_R
-				b.vel.x = absf(b.vel.x)
-				sfx.play("wall")
-			elif b.pos.x > W - BALL_R:
-				b.pos.x = W - BALL_R
-				b.vel.x = -absf(b.vel.x)
-				sfx.play("wall")
-			if b.pos.y < BALL_R:
-				b.pos.y = BALL_R
-				b.vel.y = absf(b.vel.y)
-				sfx.play("wall")
-			if b.vel.y > 0 and _circle_hits(b.pos, paddle_rect()):
-				_on_paddle_hit(b)
-			for br in bricks:
-				if _resolve_brick(b, br):
-					_on_brick_hit(br)
-					break
-			if state != "play":
-				return
-		# keep constant speed and avoid near-horizontal endless bouncing
-		if absf(b.vel.y) < s * 0.28:
-			b.vel.y = (-1.0 if b.vel.y < 0 else 1.0) * s * 0.28
-		b.vel = b.vel.normalized() * s
-		if b.pos.y > H + 30:
-			balls.erase(b)
+		for a in asteroids:
+			if b.pos.distance_squared_to(a.pos) < a.r * a.r:
+				bolts.erase(b)
+				_hit_rock(a, b.pos)
+				break
+		if state != "play":
+			return
 
 
-func _circle_hits(p: Vector2, r: Rect2) -> bool:
-	var closest := Vector2(clampf(p.x, r.position.x, r.end.x), clampf(p.y, r.position.y, r.end.y))
-	return p.distance_squared_to(closest) < BALL_R * BALL_R
-
-
-func _resolve_brick(b: Dictionary, br: Dictionary) -> bool:
-	var r: Rect2 = br.rect
-	var closest := Vector2(clampf(b.pos.x, r.position.x, r.end.x), clampf(b.pos.y, r.position.y, r.end.y))
-	var d: Vector2 = b.pos - closest
-	if d.length_squared() >= BALL_R * BALL_R:
-		return false
-	if d == Vector2.ZERO:
-		b.vel.y = -b.vel.y
-		return true
-	if absf(d.x) > absf(d.y):
-		b.vel.x = signf(d.x) * absf(b.vel.x)
-	else:
-		b.vel.y = signf(d.y) * absf(b.vel.y)
-	b.pos = closest + d.normalized() * BALL_R
-	return true
-
-
-func _on_paddle_hit(b: Dictionary) -> void:
-	var diff := clampf((b.pos.x - paddle_x) / (paddle_width() / 2), -1.0, 1.0)
-	var a := deg_to_rad(diff * 62.0)
-	b.vel = Vector2(sin(a), -cos(a)) * current_speed()
-	b.pos.y = PADDLE_Y - PADDLE_H / 2 - BALL_R
-	combo = 0
-	sfx.play("paddle")
-	var t := create_tween()
-	t.tween_property(self, "paddle_squash", 0.7, 0.07)
-	t.tween_property(self, "paddle_squash", 1.0, 0.07)
-
-
-func _on_brick_hit(br: Dictionary) -> void:
-	br.flash = 0.12
-	if br.hp < 0:
-		sfx.play("hard")
+func _hit_rock(a: Dictionary, at: Vector2) -> void:
+	a.hp -= 1
+	a.flash = 0.1
+	fx.burst(at, 6, [GREEN, Color("#b8ffc9")])
+	if a.hp > 0:
+		sfx.play("hit")
 		return
-	if br.hp > 1:
-		br.hp -= 1
-		br.color = theme.bricks[br.hp - 1]
-		sfx.play("hard")
-		return
-
-	combo += 1
-	var points := 10 + (combo - 1) * 5
-	score += points
-	sfx.brick(combo)
-	var center: Vector2 = br.rect.get_center()
-	fx.burst(center, 14, [br.color])
-	float_text(center, "+%d" % points)
-	bricks.erase(br)
-
-	if randf() < 0.15:
-		capsules.append({"pos": center, "type": BONUSES.keys()[randi() % BONUSES.size()]})
-
-	if combo >= 3 and combo % 3 == 0:
-		heroine.cheer()
-		say(pick(PHRASES.combo).replace("{n}", str(combo)), 1.5)
-		fx.burst(Vector2(PANEL_W / 2, 250), 16, [Color("#ffd700"), Color.WHITE, Color("#ff8fd2")], "star")
-		sfx.play("combo")
-
-	if breakable_left() == 0:
+	_explode_rock(a, true)
+	if formation_left() == 0 and state == "play":
 		level_complete()
 
 
+func _explode_rock(a: Dictionary, by_player: bool) -> void:
+	asteroids.erase(a)
+	sfx.play("explode")
+	var rock: Color = lvl.armor if a.armored else lvl.rock
+	fx.burst(a.pos, int(a.r), [rock, rock.lerp(lvl.light, 0.5), lvl.light])
+	if not by_player:
+		return
+	streak += 1
+	var points: int = 10 * a.max + streak * 2
+	score += points
+	float_text(a.pos, "+%d" % points)
+	if randf() < 0.12:
+		capsules.append({"pos": a.pos, "type": BONUSES.keys()[randi() % BONUSES.size()]})
+	if streak >= 5 and streak % 5 == 0:
+		heroine.cheer()
+		say(pick(PHRASES.streak).replace("{n}", str(streak)), 1.5)
+		fx.burst(Vector2(PANEL_W / 2, 250), 16, [Color("#ffd700"), Color.WHITE, GREEN], "star")
+		sfx.play("combo")
+
+
+func _update_formation(delta: float) -> void:
+	formation_y += 140.0 * delta if formation_y < 0 else lvl.descend * delta
+	var sway := sin(_time * 0.6) * 22.0
+	for a in asteroids.duplicate():
+		if a.free:
+			continue
+		a.pos = a.base + Vector2(sway, formation_y)
+		if a.pos.y + a.r > DANGER_Y:
+			_explode_rock(a, false)
+			formation_y -= 110.0
+			ship_hit()
+			if state != "play":
+				return
+	if state == "play" and formation_left() == 0:
+		level_complete()
+
+
+func _update_meteors(delta: float) -> void:
+	meteor_cd -= delta
+	if meteor_cd <= 0:
+		meteor_cd = lvl.meteor_every * randf_range(0.7, 1.3)
+		var m := make_rock(Vector2(randf_range(FIELD_X + 40, W - 40), -30), 14, 1)
+		m.free = true
+		m.vel = Vector2(randf_range(-70, 70), randf_range(170, 230) + level_index * 25)
+		m.spin = randf_range(-3, 3)
+		asteroids.append(m)
+	var ship := Vector2(ship_x, SHIP_Y)
+	for m in asteroids.duplicate():
+		if not m.free:
+			continue
+		m.pos += m.vel * delta
+		if m.pos.x < FIELD_X + m.r or m.pos.x > W - m.r:
+			m.vel.x = -m.vel.x
+		if m.pos.distance_to(ship) < m.r + SHIP_R:
+			_explode_rock(m, false)
+			ship_hit()
+			if state != "play":
+				return
+		elif m.pos.y > H + 40:
+			asteroids.erase(m)
+
+
+func ship_hit() -> void:
+	if invuln > 0:
+		return
+	if shield_time > 0:
+		shield_time = 0.0
+		invuln = 1.0
+		sfx.play("shield")
+		say("Щит врятував!", 1.4)
+		return
+	lives -= 1
+	streak = 0
+	invuln = 2.0
+	sfx.play("lose")
+	_shake(0.3)
+	fx.burst(Vector2(ship_x, SHIP_Y), 30, [Color("#ffb347"), Color("#ff5a3c"), Color.WHITE])
+	if lives <= 0:
+		game_over()
+		return
+	heroine.sad()
+	say(pick(PHRASES.hit), 1.8)
+
+
+func game_over() -> void:
+	state = "over"
+	firing = false
+	bolts.clear()
+	heroine.sad(true)
+	say("Не здавайся! Спробуймо ще раз?", 0)
+	sfx.play("game_over")
+	big_text = "GAME OVER"
+	big_color = Color("#ff4f6a")
+	center_text = "Рахунок: %d\nТапни, щоб грати знову" % score
+
+
 func _update_capsules(delta: float) -> void:
-	var pr := paddle_rect()
 	for c in capsules.duplicate():
-		c.pos.y += 190 * delta
-		var cr := Rect2(c.pos.x - 27, c.pos.y - 12, 54, 24)
-		if cr.intersects(pr):
+		c.pos.y += 150 * delta
+		if c.pos.distance_to(Vector2(ship_x, SHIP_Y)) < 44:
 			capsules.erase(c)
 			apply_bonus(c.type)
 		elif c.pos.y > H + 30:
@@ -397,84 +437,44 @@ func apply_bonus(type: String) -> void:
 	heroine.surprised()
 	say(info.say, 1.6)
 	score += 25
-	float_text(Vector2(paddle_x, PADDLE_Y - 40), info.say, info.color)
+	float_text(Vector2(ship_x, SHIP_Y - 60), info.say, info.color)
 	match type:
-		"wide":
-			wide_time = 12.0
-			create_tween().tween_method(func(v): paddle_scale = v; move_paddle(paddle_x), paddle_scale, 1.55, 0.2)
-		"multi":
-			var src = null
-			for b in balls:
-				if not b.on_paddle:
-					src = b
-					break
-			if src:
-				for rot in [-0.45, 0.45]:
-					var v: Vector2 = src.vel.rotated(rot)
-					v.y = -absf(v.y)
-					balls.append({"pos": src.pos, "vel": v, "on_paddle": false})
-		"slow":
-			slow_time = 10.0
-		"life":
-			lives = mini(lives + 1, 6)
-
-
-# ---------------- life / win ----------------
-func lose_life() -> void:
-	lives -= 1
-	combo = 0
-	sfx.play("lose")
-	_shake(0.25)
-	capsules.clear()
-	wide_time = 0.0
-	slow_time = 0.0
-	paddle_scale = 1.0
-
-	if lives <= 0:
-		state = "over"
-		heroine.sad(true)
-		say("Не здавайся! Спробуймо ще раз?", 0)
-		sfx.play("game_over")
-		big_text = "GAME OVER"
-		big_color = Color("#ff4f8b")
-		center_text = "Рахунок: %d\nТапни, щоб грати знову" % score
-		return
-	state = "wait"
-	heroine.sad()
-	say(pick(PHRASES.sad), 1.8)
-	later(0.7, func():
-		if state == "wait":
-			ready_ball())
+		"triple": triple_time = 10.0
+		"rapid": rapid_time = 10.0
+		"shield": shield_time = 12.0
+		"life": lives = mini(lives + 1, 6)
 
 
 func level_complete() -> void:
 	state = "transition"
-	balls.clear()
+	firing = false
+	bolts.clear()
 	capsules.clear()
+	asteroids.clear()
 	sfx.play("win")
 	heroine.victory()
 	fx.confetti_on = true
 	later(1.8, func(): fx.confetti_on = false)
 	score += 100 * (level_index + 1)
 
-	if level_index == themes.size() - 1:
+	if level_index == levels.size() - 1:
 		state = "won"
-		say("Ти справжній чемпіон!", 0)
+		say("Ти найкращий пілот галактики!", 0)
 		big_text = "ПЕРЕМОГА!"
-		big_color = Color("#ffd700")
+		big_color = Color("#ffd23f")
 		center_text = "Рахунок: %d\nТапни, щоб грати знову" % score
 		_victory_stars()
 		return
 	say(pick(PHRASES.win), 2.4)
-	big_text = "РІВЕНЬ %d ✓" % (level_index + 1)
-	big_color = Color("#ffd700")
+	big_text = "СЕКТОР %d ЧИСТИЙ" % (level_index + 1)
+	big_color = GREEN
 	later(2.6, func(): load_level(level_index + 1))
 
 
 func _victory_stars() -> void:
 	if state != "won":
 		return
-	fx.burst(Vector2(PANEL_W / 2, 300), 20, [Color("#ffd700"), Color.WHITE, Color("#ff8fd2"), Color("#7bffb5")], "star")
+	fx.burst(Vector2(PANEL_W / 2, 300), 20, [Color("#ffd700"), Color.WHITE, GREEN], "star")
 	later(2.5, _victory_stars)
 
 
@@ -483,6 +483,8 @@ func restart() -> void:
 	fx.confetti_on = false
 	score = 0
 	lives = START_LIVES
+	invuln = 0.0
+	shield_time = 0.0
 	load_level(0, true)
 	say("Поїхали ще раз!", 1.8)
 	heroine.cheer()
@@ -491,7 +493,7 @@ func restart() -> void:
 func _shake(sec: float) -> void:
 	var t := create_tween()
 	for i in int(sec / 0.03):
-		t.tween_property(self, "position", Vector2(randf_range(-6, 6), randf_range(-6, 6)), 0.03)
+		t.tween_property(self, "position", Vector2(randf_range(-7, 7), randf_range(-7, 7)), 0.03)
 	t.tween_property(self, "position", Vector2.ZERO, 0.03)
 
 
@@ -522,18 +524,25 @@ func _heart(c: Vector2, s: float, col: Color) -> void:
 
 
 func _draw() -> void:
-	Themes.draw_background(self, theme, PANEL_W, W, H)
-	_draw_bricks()
-	_draw_paddle()
+	Themes.draw_backdrop(self, lvl, level_index + 7, PANEL_W, W, H)
+	for s in stars:
+		draw_circle(s.pos, s.r, Color(1, 1, 1, s.a))
+	_draw_star()
+	for a in asteroids:
+		_draw_rock(a)
 	for c in capsules:
 		var info: Dictionary = BONUSES[c.type]
-		_rr(Rect2(c.pos.x - 27, c.pos.y - 12, 54, 24), 12, info.color)
-		_rr(Rect2(c.pos.x - 21, c.pos.y - 9, 42, 5), 3, Color(1, 1, 1, 0.5))
-		_text_centered(c.pos, info.label, 18, Color.WHITE, 54, 3)
-	for b in balls:
-		draw_circle(b.pos, BALL_R, theme.ball)
-		draw_circle(b.pos + Vector2(2, 2), BALL_R * 0.7, theme.ball.darkened(0.12))
-		draw_circle(b.pos + Vector2(-3, -3), 4, Color.WHITE)
+		draw_circle(c.pos, 22, Color(info.color, 0.25))
+		draw_circle(c.pos, 16, info.color)
+		draw_circle(c.pos + Vector2(-5, -5), 5, Color(1, 1, 1, 0.6))
+		_text_centered(c.pos, info.label, 16, Color.WHITE, 60, 3)
+	for b in bolts:
+		var tail: Vector2 = b.pos - b.vel.normalized() * 26
+		draw_line(tail, b.pos, Color(GREEN, 0.25), 12)
+		draw_line(tail, b.pos, Color(GREEN, 0.6), 6)
+		draw_line(tail, b.pos, Color("#d9ffe3"), 2.5)
+	if state not in ["over"]:
+		_draw_ship()
 	for f in floats:
 		var col: Color = f.color
 		col.a = clampf(f.life / 0.7, 0, 1)
@@ -542,45 +551,118 @@ func _draw() -> void:
 	_draw_bubble()
 
 
-func _draw_bricks() -> void:
-	for br in bricks:
-		var r: Rect2 = br.rect
-		var k := clampf((_level_time - br.delay) / 0.3, 0.0, 1.0)
-		if k <= 0.0:
-			continue
-		var s := 1.0 + 2.7 * pow(k - 1, 3) + 1.7 * pow(k - 1, 2)  # back-out ease
-		if br.flash > 0:
-			s *= 1.08
-		var rr := Rect2(r.get_center() - r.size * s / 2, r.size * s)
-		var col: Color = br.color
-		_rr(rr, 6, col.darkened(0.3))
-		_rr(Rect2(rr.position, Vector2(rr.size.x, rr.size.y - 4 * s)), 6, col.lightened(0.15) if br.flash > 0 else col)
-		draw_rect(Rect2(rr.position + Vector2(6, 4) * s, Vector2(rr.size.x - 12 * s, 4 * s)), Color(1, 1, 1, 0.35))
-		if br.hp < 0:
-			for p in [Vector2(8, 8), Vector2(68, 8), Vector2(8, 20), Vector2(68, 20)]:
-				draw_circle(rr.position + p * s, 3 * s, Color("#c9cede"))
-		elif br.hp < br.max:
-			var o := rr.position
-			draw_polyline(PackedVector2Array([o + Vector2(20, 2), o + Vector2(28, 12), o + Vector2(22, 18), o + Vector2(32, 28)]), Color(0, 0, 0, 0.45), 2)
-			draw_polyline(PackedVector2Array([o + Vector2(52, 4), o + Vector2(46, 14), o + Vector2(56, 24)]), Color(0, 0, 0, 0.45), 2)
+func _draw_star() -> void:
+	var pulse := 1.0 + sin(_time * 2.0) * 0.04
+	for i in 6:
+		draw_circle(STAR_POS, (90 - i * 12) * pulse, Color(lvl.star, 0.06 + i * 0.03))
+	draw_circle(STAR_POS, 22, lvl.light)
+	draw_circle(STAR_POS, 14, Color.WHITE)
+	# lens flare rays
+	for i in 4:
+		var d := Vector2.from_angle(i * PI / 4 + _time * 0.1)
+		draw_line(STAR_POS - d * 70, STAR_POS + d * 70, Color(lvl.light, 0.25), 2)
 
 
-func _draw_paddle() -> void:
-	var w := paddle_width()
-	var h := 24.0 * paddle_squash
-	var r := Rect2(paddle_x - w / 2, PADDLE_Y - h / 2, w, h)
-	var col: Color = theme.paddle
-	_rr(r, 12 * paddle_squash, col.darkened(0.3))
-	_rr(Rect2(r.position, Vector2(w, h - 6 * paddle_squash)), 10 * paddle_squash, col)
-	_rr(Rect2(r.position + Vector2(10, 3), Vector2(w - 20, 5)), 3, Color(1, 1, 1, 0.5))
+func _light_dir(p: Vector2) -> Vector2:
+	return (STAR_POS - p).normalized()
+
+
+func _draw_rock(a: Dictionary) -> void:
+	var L := _light_dir(a.pos)
+	var base: Color = lvl.armor if a.armored else lvl.rock
+	if a.flash > 0:
+		base = base.lerp(Color.WHITE, 0.5)
+	var r: float = a.r
+	var shape := PackedVector2Array()
+	for p in a.pts:
+		shape.append(a.pos + p.rotated(a.rot))
+
+	# shadow side, then lit layers shifted toward the star
+	draw_colored_polygon(shape, base.darkened(0.55))
+	var layers := [[0.86, 0.10, base.darkened(0.15)], [0.6, 0.28, base.lerp(lvl.light, 0.35)]]
+	for ly in layers:
+		var pts := PackedVector2Array()
+		for p in a.pts:
+			pts.append(a.pos + p.rotated(a.rot) * ly[0] + L * r * ly[1])
+		draw_colored_polygon(pts, ly[2])
+
+	# craters: dark pit with a lit far rim
+	for c in a.craters:
+		var cp: Vector2 = a.pos + c.p.rotated(a.rot)
+		draw_circle(cp, c.r, base.darkened(0.4))
+		draw_arc(cp, c.r, L.angle() + PI - 1.0, L.angle() + PI + 1.0, 8, base.lerp(lvl.light, 0.5), 1.5)
+
+	if a.armored:
+		draw_arc(a.pos, r * 0.55, a.rot, a.rot + PI * 1.2, 12, Color("#ffb347", 0.8), 3)
+	if lvl.get("lava", false):
+		draw_polyline(PackedVector2Array([a.pos + Vector2(-0.4, -0.2).rotated(a.rot) * r, a.pos, a.pos + Vector2(0.3, 0.4).rotated(a.rot) * r]), Color("#ff7a1f", 0.85), 2.5)
+	if a.hp < a.max:
+		draw_polyline(PackedVector2Array([a.pos + Vector2(0.1, -0.7).rotated(a.rot) * r, a.pos + Vector2(-0.1, -0.1).rotated(a.rot) * r, a.pos + Vector2(0.3, 0.5).rotated(a.rot) * r]), Color(0, 0, 0, 0.6), 2)
+
+	# rim light on the edges facing the star
+	var n := shape.size()
+	for i in n:
+		var p0 := shape[i]
+		var p1 := shape[(i + 1) % n]
+		var mid: Vector2 = (p0 + p1) / 2 - a.pos
+		var facing: float = mid.normalized().dot(L)
+		if facing > 0.25:
+			draw_line(p0, p1, Color(lvl.light, clampf(facing, 0.0, 1.0)), 2.5)
+
+
+func _draw_ship() -> void:
+	if invuln > 0 and fmod(_time, 0.2) < 0.1:
+		return
+	var o := Vector2(ship_x, SHIP_Y)
+	var L := _light_dir(o)
+	var lit_left := L.x < 0
+	var xf := Transform2D(ship_tilt, o)
+
+	# engine flame
+	var flick := 1.0 + sin(_time * 40.0) * 0.15
+	for ex in [-6.0, 6.0]:
+		draw_colored_polygon(xf * PackedVector2Array([Vector2(ex - 5, 32), Vector2(ex + 5, 32), Vector2(ex, 32 + 26 * flick)]), Color("#ff9a3d", 0.8))
+		draw_colored_polygon(xf * PackedVector2Array([Vector2(ex - 2.5, 32), Vector2(ex + 2.5, 32), Vector2(ex, 32 + 14 * flick)]), Color("#fff3b0"))
+	draw_circle(xf * Vector2(0, 38), 14, Color("#ff9a3d", 0.18))
+
+	var hull := Color("#4a5470")
+	var lit := hull.lerp(lvl.light, 0.45)
+	var dark := hull.darkened(0.45)
+	var left := [Vector2(0, -42), Vector2(0, 34), Vector2(-9, 34), Vector2(-13, 24), Vector2(-40, 30), Vector2(-38, 20), Vector2(-15, 6), Vector2(-10, -18)]
+	var right: Array = []
+	for p in left:
+		right.append(Vector2(-p.x, p.y))
+	draw_colored_polygon(xf * PackedVector2Array(left), lit if lit_left else dark)
+	draw_colored_polygon(xf * PackedVector2Array(right), dark if lit_left else lit)
+	# wing stripes and nose detail
+	draw_colored_polygon(xf * PackedVector2Array([Vector2(-34, 24), Vector2(-20, 14), Vector2(-20, 19), Vector2(-33, 28)]), GREEN)
+	draw_colored_polygon(xf * PackedVector2Array([Vector2(34, 24), Vector2(20, 14), Vector2(20, 19), Vector2(33, 28)]), GREEN.darkened(0.3))
+	# cockpit glass
+	var glass := PackedVector2Array()
+	for i in 16:
+		var a := TAU * i / 16.0
+		glass.append(Vector2(cos(a) * 6, -8 + sin(a) * 12))
+	draw_colored_polygon(xf * glass, Color("#1d6f8f"))
+	draw_circle(xf * Vector2(-2 if lit_left else 2, -12), 2.5, Color("#c8f4ff"))
+	# rim light along the edge facing the star
+	var edge: Array = left if lit_left else right
+	var rim := PackedVector2Array()
+	for i in range(1, edge.size()):
+		rim.append(edge[i])
+	rim.append(edge[0])
+	draw_polyline(xf * rim, Color(lvl.light, 0.9), 2)
+
+	if shield_time > 0:
+		var a := 0.35 + sin(_time * 6.0) * 0.1
+		draw_circle(o, 50, Color("#40c4ff", 0.12))
+		draw_arc(o, 50, 0, TAU, 40, Color("#40c4ff", a + 0.3), 2.5)
 
 
 func _draw_hud() -> void:
 	_text(Vector2(FIELD_X + 20, 44), "Рахунок %d" % score, 26, Color.WHITE)
-	_text(Vector2(FIELD_X, 44), "%d/%d · %s" % [level_index + 1, themes.size(), theme.name], 26, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, FIELD_W)
+	_text(Vector2(FIELD_X, 44), "%d/%d · %s" % [level_index + 1, levels.size(), lvl.name], 26, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, FIELD_W)
 	for i in maxi(lives, 0):
 		_heart(Vector2(W - 80 - i * 30, 34), 26, Color("#ff4f8b"))
-	# sound toggle
 	var c := MUTE_RECT.get_center()
 	var ic := Color(1, 1, 1, 0.9)
 	draw_rect(Rect2(c.x - 14, c.y - 6, 8, 12), ic)
@@ -591,11 +673,19 @@ func _draw_hud() -> void:
 	else:
 		draw_arc(c + Vector2(4, 0), 9, -0.9, 0.9, 8, ic, 3)
 		draw_arc(c + Vector2(4, 0), 16, -0.9, 0.9, 10, ic, 3)
+	# active power-ups
+	var px := FIELD_X + 20
+	for k in [["triple", triple_time], ["rapid", rapid_time], ["shield", shield_time]]:
+		if k[1] > 0:
+			var info: Dictionary = BONUSES[k[0]]
+			_rr(Rect2(px, 60, 70, 24), 12, Color(info.color, 0.85))
+			_text_centered(Vector2(px + 35, 72), "%s %d" % [info.label, ceili(k[1])], 16, Color.WHITE, 70, 3)
+			px += 80
 
 	if center_text != "":
-		_text_centered(Vector2(FIELD_X + FIELD_W / 2, 440), center_text, 30, Color.WHITE, FIELD_W - 80)
+		_text_centered(Vector2(FIELD_X + FIELD_W / 2, 470), center_text, 30, Color.WHITE, FIELD_W - 80)
 	if big_text != "":
-		_text_centered(Vector2(FIELD_X + FIELD_W / 2, 300), big_text, 64, big_color, FIELD_W - 40, 10)
+		_text_centered(Vector2(FIELD_X + FIELD_W / 2, 330), big_text, 60, big_color, FIELD_W - 40, 10)
 
 
 func _draw_bubble() -> void:
